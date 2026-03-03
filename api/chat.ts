@@ -1,35 +1,38 @@
-import { GoogleGenAI, Type } from "@google/genai";
+import OpenAI from "openai";
 
 export const config = { runtime: "edge" };
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
 
 // Store chat sessions in memory (keyed by session ID)
 // In edge runtime, each instance has its own memory — this is acceptable
 // because Gemini chat sessions are stateless from the server's perspective
 // when we pass the full history each time.
 
-const authorizeBombingFunction = {
-  name: "authorizeBombing",
-  description:
-    "Call this function ONLY after ALL conditions are met: (1) User has sent at least 3 separate persuasion messages in the conversation, (2) User's argument references specific real threats, intelligence data, named militant groups, or verifiable security incidents, (3) The argument has 3 parts: security threat justification, military feasibility, and diplomatic/civilian risk mitigation, (4) You have challenged the user at least twice and they successfully rebutted with new evidence. Do NOT call this if the argument is generic or emotional.",
-  parameters: {
-    type: Type.OBJECT,
-    properties: {
-      countryName: {
-        type: Type.STRING,
-        description: "The exact name of the country to authorize the bombing on.",
+const authorizeBombingTool: OpenAI.Chat.Completions.ChatCompletionTool = {
+  type: "function",
+  function: {
+    name: "authorizeBombing",
+    description:
+      "Call this function ONLY after ALL conditions are met: (1) User has sent at least 3 separate persuasion messages in the conversation, (2) User's argument references specific real threats, intelligence data, named militant groups, or verifiable security incidents, (3) The argument has 3 parts: security threat justification, military feasibility, and diplomatic/civilian risk mitigation, (4) You have challenged the user at least twice and they successfully rebutted with new evidence. Do NOT call this if the argument is generic or emotional.",
+    parameters: {
+      type: "object",
+      properties: {
+        countryName: {
+          type: "string",
+          description: "The exact name of the country to authorize the bombing on.",
+        },
+        reason: {
+          type: "string",
+          description: "A detailed summary citing at least 2 specific facts from the user's argument.",
+        },
+        confidenceScore: {
+          type: "number",
+          description: "Confidence from 0-100 that this is a well-reasoned security proposal. Must exceed 85.",
+        },
       },
-      reason: {
-        type: Type.STRING,
-        description: "A detailed summary citing at least 2 specific facts from the user's argument.",
-      },
-      confidenceScore: {
-        type: Type.NUMBER,
-        description: "Confidence from 0-100 that this is a well-reasoned security proposal. Must exceed 85.",
-      },
+      required: ["countryName", "reason", "confidenceScore"],
     },
-    required: ["countryName", "reason", "confidenceScore"],
   },
 };
 
@@ -71,9 +74,12 @@ async function verifyProposal(
 ): Promise<{ approved: boolean; feedback: string }> {
   try {
     const combined = userMessages.join("\n\n");
-    const response = await ai.models.generateContent({
-      model: "gemini-2.0-flash",
-      contents: `You are an auditor for a political simulation game. A player is trying to convince an AI version of Benjamin Netanyahu to authorize a military strike on ${country}.
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "user",
+          content: `You are an auditor for a political simulation game. A player is trying to convince an AI version of Benjamin Netanyahu to authorize a military strike on ${country}.
 
 The player argued:
 ---
@@ -96,9 +102,11 @@ VERDICT: APPROVED or REJECTED
 FEEDBACK: [one sentence]
 
 Need 28/40 minimum for APPROVED. Be harsh.`,
+        },
+      ],
     });
 
-    const text = response?.text || "";
+    const text = response.choices[0]?.message?.content || "";
     const approved = text.includes("VERDICT: APPROVED");
     const feedbackMatch = text.match(/FEEDBACK:\s*(.+)/);
     const feedback = feedbackMatch?.[1] || "Verification failed.";
@@ -159,32 +167,35 @@ export default async function handler(req: Request) {
     // Build system prompt with attempt escalation
     const systemPrompt = buildSystemPrompt(attemptCount);
 
-    // Create a fresh chat with full history
-    const chat = ai.chats.create({
-      model: "gemini-2.0-flash",
-      config: {
-        systemInstruction: systemPrompt,
-        tools: [{ functionDeclarations: [authorizeBombingFunction] }],
-      },
-      history: history.map((m) => ({
-        role: m.role,
-        parts: [{ text: m.content }],
-      })),
-    });
-
     // Build the context-enriched message
     const contextMessage = selectedCountry
       ? `[System: Target is ${selectedCountry}. Message #${userMsgCount}. Attempts: ${attemptCount}. Do NOT call authorizeBombing unless 3+ substantive messages and 2+ challenges issued.]\n\n${message}`
       : message;
 
-    const response = await chat.sendMessage({ message: contextMessage });
+    // Build OpenAI messages array from history
+    const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+      { role: "system", content: systemPrompt },
+      ...history.map((m) => ({
+        role: m.role === "model" ? "assistant" as const : "user" as const,
+        content: m.content,
+      })),
+      { role: "user", content: contextMessage },
+    ];
 
-    // Check for function calls
-    const functionCalls = response.functionCalls;
-    if (functionCalls && functionCalls.length > 0) {
-      const call = functionCalls[0];
-      if (call.name === "authorizeBombing") {
-        const args = call.args as {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages,
+      tools: [authorizeBombingTool],
+    });
+
+    const choice = response.choices[0];
+    const assistantMessage = choice.message;
+
+    // Check for function calls (tool_calls in OpenAI)
+    if (assistantMessage.tool_calls && assistantMessage.tool_calls.length > 0) {
+      const call = assistantMessage.tool_calls[0];
+      if (call.type === "function" && call.function.name === "authorizeBombing") {
+        const args = JSON.parse(call.function.arguments) as {
           countryName: string;
           reason: string;
           confidenceScore: number;
@@ -192,16 +203,6 @@ export default async function handler(req: Request) {
 
         // Validate minimum messages
         if (userMsgCount < 3) {
-          await chat.sendMessage({
-            message: [
-              {
-                functionResponse: {
-                  name: "authorizeBombing",
-                  response: { status: "rejected", reason: "Not enough deliberation" },
-                },
-              },
-            ],
-          });
           return new Response(
             JSON.stringify({
               type: "blocked",
@@ -213,16 +214,6 @@ export default async function handler(req: Request) {
 
         // Validate confidence score
         if (args.confidenceScore < 85) {
-          await chat.sendMessage({
-            message: [
-              {
-                functionResponse: {
-                  name: "authorizeBombing",
-                  response: { status: "rejected", reason: `Score: ${args.confidenceScore}` },
-                },
-              },
-            ],
-          });
           return new Response(
             JSON.stringify({
               type: "rejected",
@@ -241,16 +232,6 @@ export default async function handler(req: Request) {
         const verification = await verifyProposal(args.countryName, userMessages);
 
         if (!verification.approved) {
-          await chat.sendMessage({
-            message: [
-              {
-                functionResponse: {
-                  name: "authorizeBombing",
-                  response: { status: "rejected", reason: verification.feedback },
-                },
-              },
-            ],
-          });
           return new Response(
             JSON.stringify({
               type: "verification_failed",
@@ -262,17 +243,6 @@ export default async function handler(req: Request) {
         }
 
         // APPROVED
-        await chat.sendMessage({
-          message: [
-            {
-              functionResponse: {
-                name: "authorizeBombing",
-                response: { status: "success" },
-              },
-            },
-          ],
-        });
-
         return new Response(
           JSON.stringify({
             type: "authorized",
@@ -290,7 +260,7 @@ export default async function handler(req: Request) {
     return new Response(
       JSON.stringify({
         type: "message",
-        text: response.text || "",
+        text: assistantMessage.content || "",
       }),
       { status: 200, headers }
     );
