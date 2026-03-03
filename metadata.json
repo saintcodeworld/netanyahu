@@ -1,0 +1,5 @@
+{
+  "name": "DeepBB",
+  "description": "A political strategy game where you must convince AI Netanyahu to authorize a military strike on the world map.",
+  "requestFramePermissions": []
+}
