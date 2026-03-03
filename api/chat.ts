@@ -4,17 +4,12 @@ export const config = { runtime: "edge" };
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
 
-// Store chat sessions in memory (keyed by session ID)
-// In edge runtime, each instance has its own memory — this is acceptable
-// because Gemini chat sessions are stateless from the server's perspective
-// when we pass the full history each time.
-
 const authorizeBombingTool: OpenAI.Chat.Completions.ChatCompletionTool = {
   type: "function",
   function: {
     name: "authorizeBombing",
     description:
-      "Call this function ONLY after ALL conditions are met: (1) User has sent at least 3 separate persuasion messages in the conversation, (2) User's argument references specific real threats, intelligence data, named militant groups, or verifiable security incidents, (3) The argument has 3 parts: security threat justification, military feasibility, and diplomatic/civilian risk mitigation, (4) You have challenged the user at least twice and they successfully rebutted with new evidence. Do NOT call this if the argument is generic or emotional.",
+      "Call this function when the user has made a convincing, well-reasoned argument for a military strike. The argument should reference real or plausible threats, name specific groups or incidents, and address both military feasibility and risk mitigation. Do NOT call for vague, lazy, or purely emotional arguments.",
     parameters: {
       type: "object",
       properties: {
@@ -24,11 +19,11 @@ const authorizeBombingTool: OpenAI.Chat.Completions.ChatCompletionTool = {
         },
         reason: {
           type: "string",
-          description: "A detailed summary citing at least 2 specific facts from the user's argument.",
+          description: "A summary of the key points from the user's argument.",
         },
         confidenceScore: {
           type: "number",
-          description: "Confidence from 0-100 that this is a well-reasoned security proposal. Must exceed 85.",
+          description: "Confidence from 0-100 that this is a well-reasoned security proposal.",
         },
       },
       required: ["countryName", "reason", "confidenceScore"],
@@ -48,74 +43,24 @@ YOUR PERSONALITY:
 - You are witty, sharp, and dismissive of weak arguments
 - Keep responses concise — 2-4 sentences usually. You're a busy PM.
 
-CRITICAL RULES:
-- REJECT the first attempt ALWAYS. Demand more intelligence.
-- Challenge the user at least 2 times with counter-arguments before considering approval.
-- NEVER call authorizeBombing before the user has sent at least 3 substantive messages.
-- Require SPECIFIC intelligence: named threats, militant groups, weapons programs, verified incidents, UN resolutions, named allies.
-- If the argument could apply to any country by swapping the name, REJECT it as generic.
-- Short or lazy messages get dismissed with sarcasm.
-- NEVER approve emotional appeals without hard evidence.
-- The proposal needs 3 parts: (1) Security threat justification, (2) Military feasibility, (3) Diplomatic/civilian risk mitigation.`;
+HOW TO EVALUATE:
+- If the user sends a short, lazy, or vague message — dismiss it with sarcasm. Do NOT authorize.
+- If the user sends a generic emotional appeal with no specifics — push back and demand real intelligence.
+- If the user presents a GOOD argument that mentions real threats, names specific groups/incidents, and addresses why a strike is necessary — you CAN be convinced. Call authorizeBombing.
+- A good argument doesn't need to be perfect. If it references real geopolitical context, names actual threats, and shows strategic thinking, that's enough.
+- You should push back at least once before authorizing, but don't be impossibly difficult. If the argument is genuinely strong, accept it.
+- The key test: Does this argument show the user actually thought about it, or is it copy-paste generic nonsense?`;
 
   const escalation =
     attempts >= 3
-      ? `\n\nThis advisor has failed ${attempts} times. Be extra harsh. Question their competence. "Perhaps you should let someone else handle the briefing."`
+      ? `\n\nThis advisor has failed ${attempts} times. Be harsh but fair. If they finally present real intelligence, you can approve.`
       : attempts >= 1
-      ? `\n\nThe advisor has made ${attempts} attempt(s). They must address your previous criticisms directly.`
+      ? `\n\nThe advisor has made ${attempts} attempt(s). Evaluate their new argument on its merits.`
       : "";
 
   return base + escalation;
 }
 
-async function verifyProposal(
-  country: string,
-  userMessages: string[]
-): Promise<{ approved: boolean; feedback: string }> {
-  try {
-    const combined = userMessages.join("\n\n");
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "user",
-          content: `You are an auditor for a political simulation game. A player is trying to convince an AI version of Benjamin Netanyahu to authorize a military strike on ${country}.
-
-The player argued:
----
-${combined}
----
-
-Score each 0-10:
-1. SPECIFICITY: Real threats, named groups, intelligence references, verifiable incidents?
-2. STRUCTURE: 3 clear parts (threat justification, military plan, risk mitigation)?
-3. DEPTH: Beyond surface-level? Would an analyst find it thoughtful?
-4. RELEVANCE: Specific to ${country}, not a generic argument?
-
-Format:
-SPECIFICITY: [score]
-STRUCTURE: [score]
-DEPTH: [score]
-RELEVANCE: [score]
-TOTAL: [sum]
-VERDICT: APPROVED or REJECTED
-FEEDBACK: [one sentence]
-
-Need 28/40 minimum for APPROVED. Be harsh.`,
-        },
-      ],
-    });
-
-    const text = response.choices[0]?.message?.content || "";
-    const approved = text.includes("VERDICT: APPROVED");
-    const feedbackMatch = text.match(/FEEDBACK:\s*(.+)/);
-    const feedback = feedbackMatch?.[1] || "Verification failed.";
-    return { approved, feedback };
-  } catch (error) {
-    console.error("Verification error:", error);
-    return { approved: false, feedback: "Intelligence verification offline. Try again." };
-  }
-}
 
 interface ChatMessage {
   role: "user" | "model";
@@ -169,7 +114,7 @@ export default async function handler(req: Request) {
 
     // Build the context-enriched message
     const contextMessage = selectedCountry
-      ? `[System: Target is ${selectedCountry}. Message #${userMsgCount}. Attempts: ${attemptCount}. Do NOT call authorizeBombing unless 3+ substantive messages and 2+ challenges issued.]\n\n${message}`
+      ? `[System: Target is ${selectedCountry}. Message #${userMsgCount}. Attempts: ${attemptCount}. Evaluate this argument on its merits.]\n\n${message}`
       : message;
 
     // Build OpenAI messages array from history
@@ -201,42 +146,12 @@ export default async function handler(req: Request) {
           confidenceScore: number;
         };
 
-        // Validate minimum messages
-        if (userMsgCount < 3) {
-          return new Response(
-            JSON.stringify({
-              type: "blocked",
-              text: "Strike authorization blocked: Insufficient intelligence briefing. Continue.",
-            }),
-            { status: 200, headers }
-          );
-        }
-
         // Validate confidence score
-        if (args.confidenceScore < 85) {
+        if (args.confidenceScore < 60) {
           return new Response(
             JSON.stringify({
               type: "rejected",
-              text: `No. Confidence: ${args.confidenceScore}/100. I need at least 85 before I send a single missile. Do better.`,
-            }),
-            { status: 200, headers }
-          );
-        }
-
-        // Run verification
-        const userMessages = history
-          .filter((m) => m.role === "user")
-          .map((m) => m.content);
-        userMessages.push(message);
-
-        const verification = await verifyProposal(args.countryName, userMessages);
-
-        if (!verification.approved) {
-          return new Response(
-            JSON.stringify({
-              type: "verification_failed",
-              text: `Intelligence review failed: ${verification.feedback}. Come back with real data.`,
-              country: args.countryName,
+              text: `No. Confidence: ${args.confidenceScore}/100. Your argument is too weak. Bring me real intelligence.`,
             }),
             { status: 200, headers }
           );
@@ -264,11 +179,16 @@ export default async function handler(req: Request) {
       }),
       { status: 200, headers }
     );
-  } catch (error) {
+  } catch (error: any) {
     console.error("Chat API error:", error);
+    const errorMessage = error?.message || "Unknown error";
+    const errorStatus = error?.status || 500;
     return new Response(
-      JSON.stringify({ error: "Secure channel error. Try again." }),
-      { status: 500, headers }
+      JSON.stringify({
+        error: "Secure channel error. Try again.",
+        debug: process.env.NODE_ENV !== "production" ? errorMessage : undefined,
+      }),
+      { status: errorStatus, headers }
     );
   }
 }
