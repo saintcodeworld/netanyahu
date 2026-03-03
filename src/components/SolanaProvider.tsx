@@ -4,7 +4,6 @@ import {
   WalletProvider,
 } from "@solana/wallet-adapter-react";
 import { WalletModalProvider } from "@solana/wallet-adapter-react-ui";
-import { PhantomWalletAdapter } from "@solana/wallet-adapter-phantom";
 import { clusterApiUrl } from "@solana/web3.js";
 
 import "@solana/wallet-adapter-react-ui/styles.css";
@@ -15,7 +14,9 @@ interface Props {
 
 const SolanaProvider: FC<Props> = ({ children }) => {
   const endpoint = useMemo(() => clusterApiUrl("devnet"), []);
-  const wallets = useMemo(() => [new PhantomWalletAdapter()], []);
+  // Phantom (and other wallets) register via Wallet Standard and are auto-detected.
+  // Do NOT manually add PhantomWalletAdapter — it causes a duplicate that silently breaks connection.
+  const wallets = useMemo(() => [], []);
 
   return (
     <ConnectionProvider endpoint={endpoint}>
