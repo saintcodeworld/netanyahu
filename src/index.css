@@ -163,3 +163,35 @@
 .animate-nuke-mushroom { animation: nuke-mushroom 4s ease-out forwards; }
 .animate-nuke-scorch { animation: nuke-scorch 2s ease-out forwards; }
 .animate-nuke-aftermath { animation: nuke-aftermath 2.5s ease-in-out infinite; }
+
+/* Achievement toast slide in */
+@keyframes slide-in-right {
+  0% { transform: translateX(100%); opacity: 0; }
+  100% { transform: translateX(0); opacity: 1; }
+}
+.animate-slide-in-right { animation: slide-in-right 0.4s ease-out forwards; }
+
+/* New activity pulse */
+@keyframes activity-pulse {
+  0% { background-color: rgba(239, 68, 68, 0.15); }
+  50% { background-color: rgba(239, 68, 68, 0.05); }
+  100% { background-color: transparent; }
+}
+.animate-activity-pulse { animation: activity-pulse 2s ease-out forwards; }
+
+/* Progress bar shimmer */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.animate-shimmer {
+  background-size: 200% 100%;
+  animation: shimmer 2s ease-in-out infinite;
+}
+
+/* Fade in up for tooltips */
+@keyframes fade-in-up {
+  0% { opacity: 0; transform: translateY(4px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in-up { animation: fade-in-up 0.15s ease-out forwards; }

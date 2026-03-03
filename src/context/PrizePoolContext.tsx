@@ -7,7 +7,7 @@ interface PrizePoolContextType {
 }
 
 const PrizePoolContext = createContext<PrizePoolContextType>({
-  prizePool: 5,
+  prizePool: 11.5,
   addToPool: () => {},
   claimReward: async () => 0,
 });
@@ -17,7 +17,7 @@ export const usePrizePool = () => useContext(PrizePoolContext);
 const API_BASE = "/api";
 
 export const PrizePoolProvider: FC<{ children: ReactNode }> = ({ children }) => {
-  const [prizePool, setPrizePool] = useState(5);
+  const [prizePool, setPrizePool] = useState(11.5);
 
   // Fetch server-side prize pool on mount
   useEffect(() => {

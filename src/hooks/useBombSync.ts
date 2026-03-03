@@ -13,7 +13,7 @@ interface BombSyncState {
   bombedCountries: Set<string>;
   pendingAnimations: BombEvent[];
   consumeAnimation: () => BombEvent | undefined;
-  reportBomb: (country: string, centroid: [number, number] | null) => Promise<boolean>;
+  reportBomb: (country: string, centroid: [number, number] | null, wallet?: string | null) => Promise<boolean>;
 }
 
 export function useBombSync(): BombSyncState {
@@ -101,7 +101,7 @@ export function useBombSync(): BombSyncState {
 
   // Report a bomb to the server (called when THIS user bombs a country)
   const reportBomb = useCallback(
-    async (country: string, centroid: [number, number] | null): Promise<boolean> => {
+    async (country: string, centroid: [number, number] | null, wallet?: string | null): Promise<boolean> => {
       // Mark as local so we don't double-animate
       localBombs.current.add(country);
       // Optimistically add to set
@@ -111,7 +111,7 @@ export function useBombSync(): BombSyncState {
         const res = await fetch(`${API_BASE}/bomb`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ country, centroid }),
+          body: JSON.stringify({ country, centroid, wallet: wallet || null }),
         });
         if (!res.ok) {
           const data = await res.json();

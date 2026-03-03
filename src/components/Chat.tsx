@@ -6,6 +6,9 @@ import { ScrollArea } from "./ui/scroll-area";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useSolPayment } from "../hooks/useSolPayment";
 import { usePrizePool } from "../context/PrizePoolContext";
+import { useAchievements } from "../context/AchievementContext";
+import QuickReplies from "./QuickReplies";
+import DifficultySelector, { type Difficulty } from "./DifficultySelector";
 import bibiImage from "/assets/DeepBB.png";
 
 const API_BASE = "/api";
@@ -23,6 +26,8 @@ interface ChatProps {
   onConvinced: (country: string) => void;
   onRewardClaimed?: (amount: number) => void;
   bombedCountries: Set<string>;
+  difficulty: Difficulty;
+  onChangeDifficulty: (d: Difficulty) => void;
 }
 
 // Track used prompts globally to prevent reuse across countries
@@ -55,7 +60,7 @@ const ALLY_MESSAGES_UK: string[] = [
 let allyMsgIndexUS = 0;
 let allyMsgIndexUK = 0;
 
-export default function ChatComponent({ selectedCountry, onConvinced, onRewardClaimed, bombedCountries }: ChatProps) {
+export default function ChatComponent({ selectedCountry, onConvinced, onRewardClaimed, bombedCountries, difficulty, onChangeDifficulty }: ChatProps) {
   const [messages, setMessages] = useState<Message[]>([
     {
       role: "model",
@@ -65,8 +70,11 @@ export default function ChatComponent({ selectedCountry, onConvinced, onRewardCl
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [attemptCount, setAttemptCount] = useState(0);
+  const [totalMessages, setTotalMessages] = useState(0);
+  const [totalSpent, setTotalSpent] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
   const prevCountryRef = useRef<string | null>(null);
+  const { unlockAchievement } = useAchievements();
 
   // When an ally country is selected, show a funny warning message
   useEffect(() => {
@@ -167,6 +175,8 @@ export default function ChatComponent({ selectedCountry, onConvinced, onRewardCl
 
     // Payment successful — add to prize pool
     addToPool(messageCost);
+    setTotalSpent((prev) => prev + messageCost);
+    if (totalSpent + messageCost >= 0.1) unlockAchievement("big_spender");
     setMessages((prev) => [
       ...prev,
       { role: "system", content: `${messageCost} SOL added to prize pool. Pool: ${(prizePool + messageCost).toFixed(2)} SOL` },
@@ -179,6 +189,11 @@ export default function ChatComponent({ selectedCountry, onConvinced, onRewardCl
     setMessages((prev) => [...prev, { role: "user", content: userMessage }]);
     setIsLoading(true);
     setAttemptCount((prev) => prev + 1);
+    setTotalMessages((prev) => {
+      const next = prev + 1;
+      if (next >= 10) unlockAchievement("persistent");
+      return next;
+    });
 
     try {
       const userMsgCount = messages.filter((m) => m.role === "user").length + 1;
@@ -197,6 +212,7 @@ export default function ChatComponent({ selectedCountry, onConvinced, onRewardCl
           attemptCount: attemptCount + 1,
           selectedCountry,
           userMsgCount,
+          difficulty,
         }),
       });
 
@@ -234,7 +250,7 @@ export default function ChatComponent({ selectedCountry, onConvinced, onRewardCl
           setMessages((prev) => [
             ...prev,
             { role: "model", content: data.text },
-            { role: "system", content: `YOU WON! Prize pool reward: ${reward.toFixed(2)} SOL claimed!` },
+            { role: "system", content: `YOU WON! Reward: 1.00 SOL claimed!` },
           ]);
           onConvinced(data.country);
           if (onRewardClaimed) onRewardClaimed(reward);
@@ -262,11 +278,28 @@ export default function ChatComponent({ selectedCountry, onConvinced, onRewardCl
       <div className="px-4 py-2.5 bg-[hsl(220,30%,7%)] border-b border-blue-900/20 text-xs flex items-center gap-2 text-blue-400/70">
         <Crosshair className="w-3.5 h-3.5 text-blue-500" />
         {selectedCountry ? (
-          <span>Target: <strong className="text-blue-300">{selectedCountry}</strong></span>
+          <span className="flex-1">Target: <strong className="text-blue-300">{selectedCountry}</strong></span>
         ) : (
-          <span className="text-blue-500/50">Select a target on the map</span>
+          <span className="flex-1 text-blue-500/50">Select a target on the map</span>
         )}
+        <DifficultySelector difficulty={difficulty} onChangeDifficulty={onChangeDifficulty} />
       </div>
+
+      {/* Conviction progress bar */}
+      {selectedCountry && attemptCount > 0 && (
+        <div className="px-4 py-1.5 bg-[hsl(220,30%,7%)] border-b border-blue-900/15">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[9px] font-mono text-blue-500/40 uppercase">Conviction Progress</span>
+            <span className="text-[9px] font-mono text-blue-400/50">{Math.min(attemptCount * 20, 95)}%</span>
+          </div>
+          <div className="h-1.5 bg-blue-900/20 rounded-full overflow-hidden">
+            <div
+              className="h-full rounded-full transition-all duration-700 bg-gradient-to-r from-blue-600 via-amber-500 to-red-500 animate-shimmer"
+              style={{ width: `${Math.min(attemptCount * 20, 95)}%` }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Messages */}
       <ScrollArea className="flex-1 p-4" ref={scrollRef}>
@@ -314,6 +347,13 @@ export default function ChatComponent({ selectedCountry, onConvinced, onRewardCl
           )}
         </div>
       </ScrollArea>
+
+      {/* Quick Replies */}
+      <QuickReplies
+        selectedCountry={selectedCountry}
+        onSelect={(text) => setInput(text)}
+        visible={!isLoading && connected && messages.length <= 3}
+      />
 
       {/* Input */}
       <div className="p-3 bg-[hsl(220,30%,7%)] border-t border-blue-900/20">

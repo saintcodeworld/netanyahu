@@ -60,10 +60,14 @@ export default async function handler(req: Request) {
       }
 
       if (action === "claim") {
-        const { data, error } = await supabase.rpc("claim_reward");
+        const FIXED_REWARD = 1.0;
+        const { data, error } = await supabase.rpc("claim_fixed_reward", {
+          reward_amount: FIXED_REWARD,
+        });
         if (error) throw error;
+        const newBalance = Number(data);
         return new Response(
-          JSON.stringify({ reward: Number(data), balance: 5.0 }),
+          JSON.stringify({ reward: FIXED_REWARD, balance: newBalance }),
           { status: 200, headers }
         );
       }

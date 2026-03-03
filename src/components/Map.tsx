@@ -19,6 +19,7 @@ interface MapProps {
   bombPhase: "idle" | "circling" | "missile" | "explode" | "done";
   bombedCountries: Set<string>;
   isTestBomb?: boolean;
+  onHoverCountry?: (country: string | null, position: { x: number; y: number } | null) => void;
 }
 
 const PROTECTED_ALLIES = new Set(["United States of America", "United States", "United Kingdom"]);
@@ -39,7 +40,7 @@ const F15Icon = ({ rotation = 0, scale = 1 }: { rotation?: number; scale?: numbe
   </g>
 );
 
-const MapComponent = ({ selectedCountry, onSelectCountry, isConvinced, bombPhase, bombedCountries, isTestBomb = false }: MapProps) => {
+const MapComponent = ({ selectedCountry, onSelectCountry, isConvinced, bombPhase, bombedCountries, isTestBomb = false, onHoverCountry }: MapProps) => {
   const [targetCentroid, setTargetCentroid] = useState<[number, number] | null>(null);
   const [circleAngle, setCircleAngle] = useState(0);
   const [escortProgress, setEscortProgress] = useState(0);
@@ -143,6 +144,21 @@ const MapComponent = ({ selectedCountry, onSelectCountry, isConvinced, bombPhase
                         const centroid = geoCentroid(geo);
                         setTargetCentroid(centroid);
                         onSelectCountry(name, centroid);
+                      }}
+                      onMouseEnter={(e) => {
+                        if (onHoverCountry) {
+                          onHoverCountry(name, { x: e.clientX, y: e.clientY });
+                        }
+                      }}
+                      onMouseMove={(e) => {
+                        if (onHoverCountry) {
+                          onHoverCountry(name, { x: e.clientX, y: e.clientY });
+                        }
+                      }}
+                      onMouseLeave={() => {
+                        if (onHoverCountry) {
+                          onHoverCountry(null, null);
+                        }
                       }}
                       style={{
                         default: {

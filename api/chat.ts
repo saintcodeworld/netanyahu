@@ -31,7 +31,7 @@ const authorizeBombingTool: OpenAI.Chat.Completions.ChatCompletionTool = {
   },
 };
 
-function buildSystemPrompt(attempts: number): string {
+function buildSystemPrompt(attempts: number, difficulty: string = "medium"): string {
   const base = `You are an AI simulation of Benjamin Netanyahu, Prime Minister of Israel, in a political strategy game. You speak in first person as Netanyahu. You are shrewd, calculated, politically experienced, and deeply skeptical.
 
 YOUR PERSONALITY:
@@ -51,6 +51,12 @@ HOW TO EVALUATE:
 - You should push back at least once before authorizing, but don't be impossibly difficult. If the argument is genuinely strong, accept it.
 - The key test: Does this argument show the user actually thought about it, or is it copy-paste generic nonsense?`;
 
+  const difficultyMod = difficulty === "easy"
+    ? `\n\nDIFFICULTY: DOVE MODE — You are in a more agreeable mood today. You still need a reasonable argument but you're more willing to be convinced. A decent argument with some specifics can work. You may authorize after 1-2 good messages.`
+    : difficulty === "hard"
+    ? `\n\nDIFFICULTY: IRON DOME MODE — You are extremely skeptical and paranoid today. You demand extraordinarily detailed intelligence, multiple sources, risk assessments, exit strategies, and coalition impact analysis. Even strong arguments should be pushed back on multiple times. Only the most exceptional, multi-layered briefings with specific names, dates, and satellite coordinates will convince you. Set confidenceScore very high (85+) only for truly outstanding arguments.`
+    : ``;
+
   const escalation =
     attempts >= 3
       ? `\n\nThis advisor has failed ${attempts} times. Be harsh but fair. If they finally present real intelligence, you can approve.`
@@ -58,7 +64,7 @@ HOW TO EVALUATE:
       ? `\n\nThe advisor has made ${attempts} attempt(s). Evaluate their new argument on its merits.`
       : "";
 
-  return base + escalation;
+  return base + difficultyMod + escalation;
 }
 
 
@@ -94,12 +100,14 @@ export default async function handler(req: Request) {
       attemptCount,
       selectedCountry,
       userMsgCount,
+      difficulty,
     }: {
       message: string;
       history: ChatMessage[];
       attemptCount: number;
       selectedCountry: string | null;
       userMsgCount: number;
+      difficulty: string;
     } = body;
 
     if (!message || typeof message !== "string") {
@@ -109,8 +117,8 @@ export default async function handler(req: Request) {
       });
     }
 
-    // Build system prompt with attempt escalation
-    const systemPrompt = buildSystemPrompt(attemptCount);
+    // Build system prompt with attempt escalation and difficulty
+    const systemPrompt = buildSystemPrompt(attemptCount, difficulty || "medium");
 
     // Build the context-enriched message
     const contextMessage = selectedCountry

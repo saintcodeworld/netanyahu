@@ -28,7 +28,7 @@ export default async function handler(req: Request) {
 
   try {
     const body = await req.json();
-    const { country, centroid } = body;
+    const { country, centroid, wallet } = body;
 
     if (!country || typeof country !== "string") {
       return new Response(JSON.stringify({ error: "Missing country" }), {
@@ -53,6 +53,7 @@ export default async function handler(req: Request) {
     const event = JSON.stringify({
       country,
       centroid: centroid || null,
+      wallet: wallet || null,
       timestamp: Date.now(),
     });
     await redis.lpush(BOMB_EVENTS_KEY, event);

@@ -3,13 +3,13 @@
 
 CREATE TABLE IF NOT EXISTS prize_pool (
   id TEXT PRIMARY KEY DEFAULT 'global',
-  balance NUMERIC NOT NULL DEFAULT 5.0,
+  balance NUMERIC NOT NULL DEFAULT 11.50,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Insert the initial row (5 SOL simulated starting balance)
+-- Insert the initial row (11.50 SOL starting balance)
 INSERT INTO prize_pool (id, balance)
-VALUES ('global', 5.0)
+VALUES ('global', 11.50)
 ON CONFLICT (id) DO NOTHING;
 
 -- Function to atomically add to the pool
@@ -26,14 +26,16 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Function to claim the reward (returns current balance and resets to 5)
-CREATE OR REPLACE FUNCTION claim_reward()
+-- Function to claim a fixed reward (deducts reward_amount from pool, returns new balance)
+CREATE OR REPLACE FUNCTION claim_fixed_reward(reward_amount NUMERIC)
 RETURNS NUMERIC AS $$
 DECLARE
-  current_balance NUMERIC;
+  new_balance NUMERIC;
 BEGIN
-  SELECT balance INTO current_balance FROM prize_pool WHERE id = 'global' FOR UPDATE;
-  UPDATE prize_pool SET balance = 5.0, updated_at = now() WHERE id = 'global';
-  RETURN current_balance;
+  UPDATE prize_pool
+  SET balance = GREATEST(balance - reward_amount, 0), updated_at = now()
+  WHERE id = 'global'
+  RETURNING balance INTO new_balance;
+  RETURN new_balance;
 END;
 $$ LANGUAGE plpgsql;

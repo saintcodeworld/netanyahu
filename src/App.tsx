@@ -3,13 +3,27 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import MapComponent from "./components/Map";
 import ChatComponent from "./components/Chat";
 import WalletConnect from "./components/WalletConnect";
+import Leaderboard from "./components/Leaderboard";
+import ActivityFeed from "./components/ActivityFeed";
+import HowItWorks from "./components/HowItWorks";
+import { AchievementPanel, AchievementToast } from "./components/AchievementBadge";
+import CountryTooltip from "./components/CountryTooltip";
+import SoundToggle from "./components/SoundToggle";
+import Onboarding from "./components/Onboarding";
+import GlobalStats from "./components/GlobalStats";
+import DailyChallenge from "./components/DailyChallenge";
+import StreakCounter, { recordPlay } from "./components/StreakCounter";
 import confetti from "canvas-confetti";
 import { usePrizePool } from "./context/PrizePoolContext";
 import { useBombSync } from "./hooks/useBombSync";
+import { useWallet } from "@solana/wallet-adapter-react";
+import { useAchievements } from "./context/AchievementContext";
+import { useSoundSettings } from "./context/SoundContext";
+import type { Difficulty } from "./components/DifficultySelector";
 import bibiImage from "/assets/DeepBB.png";
 
 const PROTECTED_ALLIES = new Set(["United States of America", "United States", "United Kingdom"]);
@@ -25,6 +39,25 @@ export default function App() {
   const [isTestBomb, setIsTestBomb] = useState(false);
   const { prizePool } = usePrizePool();
   const { bombedCountries, pendingAnimations, consumeAnimation, reportBomb } = useBombSync();
+  const { publicKey, connected } = useWallet();
+  const { unlockAchievement } = useAchievements();
+  const { soundEnabled } = useSoundSettings();
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
+  const [showHowItWorks, setShowHowItWorks] = useState(false);
+  const [showAchievements, setShowAchievements] = useState(false);
+  const [showGlobalStats, setShowGlobalStats] = useState(false);
+  const [showDailyChallenge, setShowDailyChallenge] = useState(false);
+  const [difficulty, setDifficulty] = useState<Difficulty>("medium");
+  const [hoveredCountry, setHoveredCountry] = useState<string | null>(null);
+  const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number } | null>(null);
+
+  // Unlock wallet achievement
+  useEffect(() => {
+    if (connected) unlockAchievement("first_login");
+  }, [connected]);
+
+  // Record streak on mount
+  useEffect(() => { recordPlay(); }, []);
 
   const handleRewardClaimed = (amount: number) => {
     setLastReward(amount);
@@ -54,9 +87,11 @@ export default function App() {
     setAnimatingCountry(country);
 
     // Play bomb sound synced with the full mission (14s)
-    const audio = new Audio("/bomb sound.mp3");
-    audio.volume = 1;
-    audio.play().catch(() => {});
+    if (soundEnabled) {
+      const audio = new Audio("/bomb sound.mp3");
+      audio.volume = 1;
+      audio.play().catch(() => {});
+    }
     // Phase 1: F-15s circle around Israel for 5 seconds
     setBombPhase("circling");
 
@@ -103,15 +138,27 @@ export default function App() {
   useEffect(() => {
     if (isConvinced && selectedCountry) {
       triggerBomb(selectedCountry, targetCentroid, false);
-      reportBomb(selectedCountry, targetCentroid);
+      reportBomb(selectedCountry, targetCentroid, publicKey?.toBase58() || null);
 
-      setTransferStatus(`Claiming ${lastReward.toFixed(2)} SOL reward...`);
+      // Achievement tracking for bombs
+      const newBombCount = bombedCountries.size + 1;
+      unlockAchievement("first_blood");
+      if (newBombCount >= 3) unlockAchievement("serial_bomber");
+      if (newBombCount >= 5) unlockAchievement("strategist");
+      if (newBombCount >= 10) unlockAchievement("world_domination");
+
+      setTransferStatus(`Claiming 1.00 SOL reward...`);
       setTimeout(() => {
-        setTransferStatus(`${lastReward.toFixed(2)} SOL reward claimed!`);
+        setTransferStatus(`1.00 SOL reward claimed!`);
         setTimeout(() => setTransferStatus(null), 5000);
       }, 3500);
     }
   }, [isConvinced, selectedCountry, targetCentroid, lastReward]);
+
+  const handleHoverCountry = useCallback((country: string | null, position: { x: number; y: number } | null) => {
+    setHoveredCountry(country);
+    setTooltipPos(position);
+  }, []);
 
   return (
     <div className="flex h-screen w-full bg-[hsl(220,30%,6%)] text-white overflow-hidden relative">
@@ -144,6 +191,8 @@ export default function App() {
           onConvinced={() => setIsConvinced(true)}
           onRewardClaimed={handleRewardClaimed}
           bombedCountries={bombedCountries}
+          difficulty={difficulty}
+          onChangeDifficulty={setDifficulty}
         />
       </div>
 
@@ -162,17 +211,50 @@ export default function App() {
           bombPhase={bombPhase}
           bombedCountries={bombedCountries}
           isTestBomb={isTestBomb}
+          onHoverCountry={handleHoverCountry}
         />
 
         {/* ===== PRIZE POOL — big visible panel ===== */}
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
-          <div className="bg-black/80 backdrop-blur-md border border-amber-500/40 rounded-xl px-8 py-3 shadow-2xl shadow-amber-500/10 flex items-center gap-4">
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-2">
+          <div className="bg-black/80 backdrop-blur-md border border-amber-500/40 rounded-xl px-8 py-3 shadow-2xl shadow-amber-500/10 flex items-center gap-4 pointer-events-none">
             <div className="text-amber-500 text-2xl">🏆</div>
             <div className="text-center">
               <div className="text-[10px] uppercase tracking-[0.2em] text-amber-400/60 font-mono">Prize Pool</div>
               <div className="text-2xl font-black text-amber-400 font-mono tabular-nums">{prizePool.toFixed(2)} SOL</div>
             </div>
             <div className="text-amber-500 text-2xl">🏆</div>
+          </div>
+          <div className="flex gap-2 flex-wrap justify-center">
+            <button
+              onClick={() => setShowLeaderboard(true)}
+              className="bg-black/70 backdrop-blur-md border border-blue-900/40 text-blue-300 text-[11px] font-mono px-3 py-1.5 rounded-lg hover:border-blue-500/50 hover:text-blue-200 transition-all cursor-pointer"
+            >
+              🏆 Leaderboard
+            </button>
+            <button
+              onClick={() => setShowAchievements(true)}
+              className="bg-black/70 backdrop-blur-md border border-blue-900/40 text-blue-300 text-[11px] font-mono px-3 py-1.5 rounded-lg hover:border-blue-500/50 hover:text-blue-200 transition-all cursor-pointer"
+            >
+              🎖 Achievements
+            </button>
+            <button
+              onClick={() => setShowGlobalStats(true)}
+              className="bg-black/70 backdrop-blur-md border border-blue-900/40 text-blue-300 text-[11px] font-mono px-3 py-1.5 rounded-lg hover:border-blue-500/50 hover:text-blue-200 transition-all cursor-pointer"
+            >
+              📊 Intel
+            </button>
+            <button
+              onClick={() => setShowDailyChallenge(true)}
+              className="bg-black/70 backdrop-blur-md border border-amber-900/40 text-amber-300 text-[11px] font-mono px-3 py-1.5 rounded-lg hover:border-amber-500/50 hover:text-amber-200 transition-all cursor-pointer"
+            >
+              📅 Daily
+            </button>
+            <button
+              onClick={() => setShowHowItWorks(true)}
+              className="bg-black/70 backdrop-blur-md border border-blue-900/40 text-blue-300 text-[11px] font-mono px-3 py-1.5 rounded-lg hover:border-blue-500/50 hover:text-blue-200 transition-all cursor-pointer"
+            >
+              ❓ How It Works
+            </button>
           </div>
         </div>
 
@@ -209,7 +291,7 @@ export default function App() {
             </div>
             {!PROTECTED_ALLIES.has(selectedCountry) && (
               <button
-                onClick={() => { triggerBomb(selectedCountry, targetCentroid, false, true); }}
+                onClick={() => { triggerBomb(selectedCountry, targetCentroid, false, true); unlockAchievement("test_pilot"); }}
                 className="bg-red-600/80 hover:bg-red-600 text-white text-[11px] font-bold px-4 py-2 rounded-lg border border-red-500/50 transition-all hover:scale-105 active:scale-95 shadow-lg shadow-red-900/30 cursor-pointer"
               >
                 💣 TEST BOMB
@@ -218,13 +300,51 @@ export default function App() {
           </div>
         )}
 
-        {/* Bombed countries counter */}
-        {bombedCountries.size > 0 && (
-          <div className="absolute bottom-4 left-4 bg-black/60 border border-red-900/30 text-red-400 px-3 py-1.5 rounded-lg backdrop-blur-sm z-20">
-            <span className="text-[10px] font-mono">Bombed: {bombedCountries.size} countr{bombedCountries.size === 1 ? "y" : "ies"}</span>
-          </div>
-        )}
+        {/* Bombed countries counter + streak + sound toggle */}
+        <div className="absolute bottom-4 left-4 flex items-center gap-2 z-20">
+          {bombedCountries.size > 0 && (
+            <div className="bg-black/60 border border-red-900/30 text-red-400 px-3 py-1.5 rounded-lg backdrop-blur-sm">
+              <span className="text-[10px] font-mono">Bombed: {bombedCountries.size} countr{bombedCountries.size === 1 ? "y" : "ies"}</span>
+            </div>
+          )}
+          <StreakCounter />
+          <SoundToggle />
+        </div>
+
+        {/* Live Activity Feed */}
+        <ActivityFeed />
       </div>
+
+      {/* Country Tooltip */}
+      <CountryTooltip
+        country={hoveredCountry}
+        position={tooltipPos}
+        isBombed={hoveredCountry ? bombedCountries.has(hoveredCountry) : false}
+        isAlly={hoveredCountry ? PROTECTED_ALLIES.has(hoveredCountry) : false}
+        isIsrael={hoveredCountry === "Israel"}
+      />
+
+      {/* Achievement Toast */}
+      <AchievementToast />
+
+      {/* Onboarding */}
+      <Onboarding onComplete={() => {}} />
+
+      {/* Modals */}
+      <Leaderboard open={showLeaderboard} onClose={() => setShowLeaderboard(false)} />
+      <HowItWorks open={showHowItWorks} onClose={() => setShowHowItWorks(false)} />
+      <AchievementPanel open={showAchievements} onClose={() => setShowAchievements(false)} />
+      <GlobalStats open={showGlobalStats} onClose={() => setShowGlobalStats(false)} bombedCount={bombedCountries.size} />
+      <DailyChallenge
+        open={showDailyChallenge}
+        onClose={() => setShowDailyChallenge(false)}
+        onSelectChallenge={(country) => {
+          setSelectedCountry(country);
+          setIsConvinced(false);
+          setBombPhase("idle");
+        }}
+        bombedCountries={bombedCountries}
+      />
     </div>
   );
 }
