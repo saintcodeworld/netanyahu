@@ -33,11 +33,14 @@ export function useSolPayment() {
       );
 
       const { blockhash, lastValidBlockHeight } =
-        await connection.getLatestBlockhash();
+        await connection.getLatestBlockhash("confirmed");
       transaction.recentBlockhash = blockhash;
       transaction.feePayer = publicKey;
 
-      const signature = await sendTransaction(transaction, connection);
+      const signature = await sendTransaction(transaction, connection, {
+        skipPreflight: false,
+        preflightCommitment: "confirmed",
+      });
 
       await connection.confirmTransaction(
         { signature, blockhash, lastValidBlockHeight },

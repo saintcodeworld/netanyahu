@@ -13,7 +13,10 @@ interface Props {
 }
 
 const SolanaProvider: FC<Props> = ({ children }) => {
-  const endpoint = useMemo(() => clusterApiUrl("devnet"), []);
+  const endpoint = useMemo(
+    () => import.meta.env.VITE_SOLANA_RPC_URL || clusterApiUrl("mainnet-beta"),
+    []
+  );
   // Phantom (and other wallets) register via Wallet Standard and are auto-detected.
   // Do NOT manually add PhantomWalletAdapter — it causes a duplicate that silently breaks connection.
   const wallets = useMemo(() => [], []);
